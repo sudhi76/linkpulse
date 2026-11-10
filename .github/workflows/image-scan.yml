@@ -1,0 +1,70 @@
+name: image-scan
+
+# New vulnerabilities are published every day, so an image that passed its
+# scan when it was built can become vulnerable without any code change.
+# This rescans the most recently published API image once a week.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+  # Runs on PRs that change this file, so changes are tested before merging.
+  pull_request:
+    paths:
+      - ".github/workflows/image-scan.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan published image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read # list the published image versions
+      security-events: write # upload results to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Newest tagged version in GHCR. Untagged versions are attestation
+      # manifests (SBOM, provenance), not images.
+      - name: Find latest image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api "/users/${{ github.repository_owner }}/packages/container/linkpulse-api/versions" \
+            --jq '[.[] | select(.metadata.container.tags | length > 0)] | sort_by(.created_at) | last | .metadata.container.tags[0]')
+          test -n "$tag" && test "$tag" != "null"
+          echo "ref=ghcr.io/${{ github.repository_owner }}/linkpulse-api:$tag" >> "$GITHUB_OUTPUT"
+          echo "Scanning ghcr.io/${{ github.repository_owner }}/linkpulse-api:$tag" >> "$GITHUB_STEP_SUMMARY"
+
+      # Same thresholds as the PR scan: fail on HIGH or CRITICAL with a fix.
+      # A failure here means: rebuild and publish the image.
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan image (SARIF)
+        if: ${{ !cancelled() && steps.image.outputs.ref != '' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy.sarif
+          skip-setup-trivy: true
+
+      - name: Upload scan results
+        if: ${{ !cancelled() && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-published-api
