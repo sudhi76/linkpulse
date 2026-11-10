@@ -1,11 +1,9 @@
 name: api
 
 on:
+  # No path filter on pull requests: these checks are required to merge into
+  # main, and a required check that never starts would block the PR forever.
   pull_request:
-    paths:
-      - "services/api/**"
-      - "docker-compose.yml"
-      - ".github/workflows/api.yml"
   push:
     branches: [main]
     paths:
