@@ -152,7 +152,7 @@ helm -n linkpulse install linkpulse deploy/charts/linkpulse \
 kubectl -n linkpulse port-forward svc/linkpulse-api 8080:80
 ```
 
-The published image is `amd64` only. On Apple Silicon, build it locally and load it into the cluster instead:
+Published images cover `amd64` and `arm64`, so this works on Apple Silicon too. To run code that isn't on `main` yet, build the image locally and load it into the cluster instead:
 
 ```bash
 docker build -t ghcr.io/sudhi76/linkpulse-api:dev services/api
