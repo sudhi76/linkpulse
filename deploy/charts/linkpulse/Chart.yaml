@@ -1,0 +1,10 @@
+apiVersion: v2
+name: linkpulse
+description: LinkPulse URL shortener (api; web and worker to follow)
+type: application
+# Chart version: bump when the templates or defaults change.
+version: 0.1.0
+# No appVersion: the image tag is set per environment (commit SHA) in values.
+home: https://github.com/sudhi76/linkpulse
+sources:
+  - https://github.com/sudhi76/linkpulse

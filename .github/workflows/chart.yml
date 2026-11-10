@@ -1,0 +1,69 @@
+name: chart
+
+on:
+  pull_request:
+    paths:
+      - "deploy/charts/**"
+      - ".github/workflows/chart.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/charts/**"
+      - ".github/workflows/chart.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+
+jobs:
+  lint:
+    name: Lint and validate chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+
+      # Downloaded binary checked against a pinned checksum.
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      # Placeholder values for the required settings; real ones come from the
+      # environment's values file.
+      - name: Lint
+        run: >-
+          helm lint --strict deploy/charts/linkpulse
+          --set api.image.tag=ci --set api.database.existingSecret=ci
+
+      # Renders with ingress on as well, so every template is validated
+      # against the Kubernetes API schemas.
+      - name: Validate rendered manifests
+        run: |
+          set -euo pipefail
+          helm template linkpulse deploy/charts/linkpulse \
+            --set api.image.tag=ci --set api.database.existingSecret=ci \
+            --set api.ingress.enabled=true --set api.ingress.host=ci.example.com \
+            | kubeconform -strict -summary -kubernetes-version 1.34.0
+
+      # The chart must refuse to render without an image tag, so nobody can
+      # deploy an unpinned image by accident.
+      - name: Image tag is required
+        run: |
+          if helm template linkpulse deploy/charts/linkpulse --set api.database.existingSecret=ci 2>/dev/null; then
+            echo "::error::chart rendered without api.image.tag"
+            exit 1
+          fi

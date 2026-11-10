@@ -1,0 +1,57 @@
+api:
+  image:
+    repository: ghcr.io/sudhi76/linkpulse-api
+    # Required: the commit SHA of the image to deploy. There is no default
+    # and no "latest", so every deploy points at exactly one build.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # Ignored while autoscaling is enabled; the HPA owns the replica count.
+  replicas: 2
+
+  # Public URL that short links are built from, e.g. https://lnk.example.com
+  baseUrl: http://localhost:8000
+
+  database:
+    # Name of an existing Secret holding the SQLAlchemy URL, e.g.
+    # postgresql+psycopg://user:pass@host:5432/linkpulse. Created outside
+    # the chart (External Secrets in AWS, kubectl locally), so credentials
+    # never live in Git.
+    existingSecret: ""
+    secretKey: DATABASE_URL
+
+  # Requests are what the scheduler reserves and what the HPA measures
+  # against. No CPU limit: CPU throttling hurts redirect latency, and the
+  # request already guarantees each pod its share. Memory is limited
+  # because a memory leak should restart one pod, not starve the node.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+  # Keeps at least one pod running during node drains and cluster upgrades.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  service:
+    port: 80
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []

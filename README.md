@@ -142,7 +142,7 @@ A local Kubernetes environment that mirrors production (kind + Argo CD + monitor
 - [x] Vulnerability scanning with Trivy; SBOM per image
 
 **Kubernetes and delivery**
-- [ ] Helm chart with probes, resource limits and HPA
+- [x] Helm chart with probes, resource limits and HPA
 - [ ] Argo CD app-of-apps with `dev` and `prod` environments
 - [ ] Automated image tag promotion via pull request
 - [ ] Canary releases with Argo Rollouts and automated rollback

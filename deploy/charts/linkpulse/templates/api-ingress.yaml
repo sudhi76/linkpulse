@@ -1,0 +1,32 @@
+{{- $ing := .Values.api.ingress -}}
+{{- if $ing.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "linkpulse.api.name" . }}
+  labels:
+    {{- include "linkpulse.api.labels" . | nindent 4 }}
+  {{- with $ing.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $ing.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "api.ingress.host is required when ingress is enabled" $ing.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "linkpulse.api.name" . }}
+                port:
+                  name: http
+{{- end }}

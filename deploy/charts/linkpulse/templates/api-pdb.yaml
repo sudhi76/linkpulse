@@ -1,0 +1,14 @@
+{{- $pdb := .Values.api.podDisruptionBudget -}}
+{{- if $pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "linkpulse.api.name" . }}
+  labels:
+    {{- include "linkpulse.api.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ $pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "linkpulse.api.selectorLabels" . | nindent 6 }}
+{{- end }}
