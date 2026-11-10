@@ -1,0 +1,30 @@
+name: linkpulse
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: linkpulse
+      POSTGRES_USER: linkpulse
+      POSTGRES_PASSWORD: linkpulse-dev  # local development only
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkpulse -d linkpulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./services/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://linkpulse:linkpulse-dev@postgres:5432/linkpulse
+      BASE_URL: http://localhost:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy  # wait until Postgres accepts connections
+
+volumes:
+  pgdata:
