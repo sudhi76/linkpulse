@@ -120,6 +120,12 @@ docker compose up --build
 cd services/api && pytest
 ```
 
+Before pushing, run the same checks CI runs on every pull request (from `services/api`):
+
+```bash
+ruff check . && ruff format --check . && pytest --cov=app --cov-fail-under=80
+```
+
 A local Kubernetes environment that mirrors production (kind + Argo CD + monitoring) is created with `make cluster-up`.
 
 ## Roadmap
@@ -131,7 +137,7 @@ A local Kubernetes environment that mirrors production (kind + Argo CD + monitor
 - [ ] Health, readiness and Prometheus metrics endpoints
 
 **Continuous integration**
-- [ ] Lint, test and coverage on every pull request
+- [x] Lint, test and coverage on every pull request
 - [ ] Image build and push tagged by commit SHA
 - [ ] Vulnerability scanning with Trivy; SBOM per image
 

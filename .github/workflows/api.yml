@@ -1,0 +1,105 @@
+name: api
+
+on:
+  pull_request:
+    paths:
+      - "services/api/**"
+      - "docker-compose.yml"
+      - ".github/workflows/api.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/api/**"
+      - "docker-compose.yml"
+      - ".github/workflows/api.yml"
+
+# Least privilege: the jobs only need to read the code.
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the run that is now out of date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/api
+
+# Actions are pinned to commit SHAs (tag in the comment): a tag can be moved
+# to different code, a SHA cannot.
+jobs:
+  lint-test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13" # same as the runtime image
+          cache: pip
+          cache-dependency-path: services/api/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Test
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+
+  image:
+    name: Build image and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Builds the image without pushing it, reusing layers from earlier runs.
+      # Pushing to a registry comes later, together with Trivy scanning.
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services/api
+          push: false
+          load: true
+          # The name Compose gives the api image, so the next step reuses it.
+          tags: linkpulse-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      # Starts the real stack (API + Postgres) and exercises it over HTTP, so
+      # a broken image, config or database connection fails the PR.
+      - name: Start stack
+        working-directory: .
+        run: docker compose up --no-build --wait --wait-timeout 120
+
+      - name: Smoke test
+        working-directory: .
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:8000/readyz
+          code=$(curl -fsS -X POST http://localhost:8000/links \
+            -H 'Content-Type: application/json' \
+            -d '{"url": "https://example.com/ci"}' | jq -r .code)
+          location=$(curl -sS -o /dev/null -w '%{redirect_url}' "http://localhost:8000/$code")
+          test "$location" = "https://example.com/ci"
+          echo "redirect OK: /$code -> $location"
+
+      - name: Show logs on failure
+        if: failure()
+        working-directory: .
+        run: docker compose logs
+
+      - name: Stop stack
+        if: always()
+        working-directory: .
+        run: docker compose down -v
