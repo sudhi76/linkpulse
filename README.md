@@ -126,6 +126,42 @@ Before pushing, run the same checks CI runs on every pull request (from `service
 ruff check . && ruff format --check . && pytest --cov=app --cov-fail-under=80
 ```
 
+### Kubernetes (kind)
+
+Runs the Helm chart against a local cluster. PostgreSQL runs in the cluster as a single-instance StatefulSet (`deploy/envs/dev/postgres.yaml`); production uses Amazon RDS instead, so the chart only takes the name of a Secret with the database URL.
+
+```bash
+kind create cluster --name linkpulse
+kubectl create namespace linkpulse
+
+# Credentials are created by hand, never committed
+kubectl -n linkpulse create secret generic postgres-credentials \
+  --from-literal=POSTGRES_PASSWORD=linkpulse-dev
+kubectl -n linkpulse create secret generic linkpulse-db \
+  --from-literal=DATABASE_URL=postgresql+psycopg://linkpulse:linkpulse-dev@postgres:5432/linkpulse
+
+kubectl -n linkpulse apply -f deploy/envs/dev/postgres.yaml
+kubectl -n linkpulse rollout status statefulset/postgres
+
+# kind has no metrics-server, so the HPA is turned off
+helm -n linkpulse install linkpulse deploy/charts/linkpulse \
+  --set api.image.tag=<commit SHA> \
+  --set api.database.existingSecret=linkpulse-db \
+  --set api.autoscaling.enabled=false
+
+kubectl -n linkpulse port-forward svc/linkpulse-api 8080:80
+```
+
+The published image is `amd64` only. On Apple Silicon, build it locally and load it into the cluster instead:
+
+```bash
+docker build -t ghcr.io/sudhi76/linkpulse-api:dev services/api
+kind load docker-image ghcr.io/sudhi76/linkpulse-api:dev --name linkpulse
+# then install with --set api.image.tag=dev
+```
+
+The database lives on the PersistentVolumeClaim `data-postgres-0`, which survives pod restarts, `helm uninstall` and deleting the StatefulSet. To start from an empty database, delete the PVC; `kind delete cluster` removes everything.
+
 A local Kubernetes environment that mirrors production (kind + Argo CD + monitoring) is created with `make cluster-up`.
 
 ## Roadmap
