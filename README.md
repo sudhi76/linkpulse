@@ -1,97 +1,168 @@
 # LinkPulse
 
-A URL shortener with click analytics, built and run the way a production platform team would do it: containers, CI/CD, Kubernetes, GitOps, observability, security, and AWS infrastructure as code.
+LinkPulse is a URL shortener with real-time click analytics. It runs as three Python services on Kubernetes and is delivered through GitOps on AWS EKS, with infrastructure managed in Terraform.
 
-The app is deliberately small. The point of this project is the **platform around it**.
+> **Status:** under active development. See [Roadmap](#roadmap) for what is in progress.
 
-## The app
+## Features
 
-| Service | What it does | Tech |
-|---|---|---|
-| `web` | Page to create short links and see click stats | Python (FastAPI + Jinja templates) |
-| `api` | `POST /links`, `GET /{code}` redirect, `GET /links/{code}/stats` | Python (FastAPI), PostgreSQL |
-| `worker` | Reads click events from a queue and aggregates stats | Python, Redis |
+- Create short links with optional custom aliases and expiry
+- Fast redirects: click tracking happens asynchronously and never slows the redirect down
+- Per-link analytics: total clicks, clicks over time, referrers and countries
+- REST API alongside the web interface
 
-Each click on a short link: `api` redirects the user immediately and pushes a click event to Redis; `worker` consumes it and updates the stats in PostgreSQL. This gives us a database, a queue, a background job and user-facing latency, which are the things worth monitoring and scaling.
-
-## Architecture (final state)
+## Architecture
 
 ```
- Developer ──push──► GitHub (app code)
-                        │
-                        ▼
-               GitHub Actions CI
-     lint → test → build → Trivy scan → push image (GHCR/ECR)
-                        │  bumps image tag
-                        ▼
-               GitOps repo (Helm values)
-                        │  watched by
-                        ▼
-                     Argo CD ──► Kubernetes (kind locally, EKS on AWS)
-                                   ├─ web / api / worker (Argo Rollouts canary)
-                                   ├─ PostgreSQL, Redis
-                                   ├─ ingress-nginx / AWS Load Balancer Controller
-                                   ├─ Prometheus, Grafana, Loki, Tempo (OpenTelemetry)
-                                   ├─ Kyverno policies, External Secrets
-                                   └─ Karpenter node autoscaling (EKS)
-                        ▲
-     Terraform: VPC, EKS, ECR, IAM (IRSA), S3 state, GitHub OIDC
+                          ┌──────────────┐
+           users ───────► │   Ingress    │  (ALB on AWS, ingress-nginx locally)
+                          └──────┬───────┘
+                 ┌───────────────┴───────────────┐
+                 ▼                               ▼
+          ┌────────────┐                  ┌────────────┐
+          │    web     │ ───── REST ────► │    api     │
+          └────────────┘                  └─────┬──────┘
+                                      reads/    │    click events
+                                      writes    │    (LPUSH)
+                               ┌────────────────┴───────┐
+                               ▼                        ▼
+                        ┌────────────┐           ┌────────────┐
+                        │ PostgreSQL │ ◄──────── │   Redis    │
+                        └────────────┘  worker   └────────────┘
+                               ▲        aggregates     │
+                               └──── ┌────────────┐ ◄──┘
+                                     │   worker   │
+                                     └────────────┘
 ```
+
+| Service | Responsibility |
+|---|---|
+| `web` | Server-rendered UI for creating links and viewing stats |
+| `api` | Link management, redirects (`GET /{code}`), stats endpoints |
+| `worker` | Consumes click events from Redis and writes aggregated stats to PostgreSQL |
+
+**Why a queue for clicks:** the redirect is the latency-critical path. The API records the click with a single Redis push and returns the redirect immediately; aggregation happens in the worker, which can fall behind under load and catch up without affecting users.
+
+## Delivery pipeline
+
+```
+ push / PR ──► GitHub Actions ──► lint, test ──► build image ──► Trivy scan ──► push to registry
+                                                                                    │
+                                                         image tag bump (PR) ◄──────┘
+                                                                │
+                                                                ▼
+                                                  deploy/ (Helm values per env)
+                                                                │
+                                                     Argo CD sync + Argo Rollouts
+                                                                │
+                                                     canary 20% → 50% → 100%
+                                                     auto-rollback on failed analysis
+```
+
+- Every change reaches production through a pull request; there is no `kubectl apply` by hand.
+- Images are tagged with the commit SHA and are immutable.
+- GitHub Actions authenticates to AWS with OIDC; no long-lived access keys exist.
+
+## Platform
+
+| Area | Tooling |
+|---|---|
+| Runtime | Kubernetes: AWS EKS (production), kind (local) |
+| Infrastructure as code | Terraform: VPC, EKS, ECR, IAM (IRSA), S3 remote state |
+| CI | GitHub Actions, Ruff, pytest, Trivy, SBOM generation |
+| CD | Argo CD (app-of-apps), Helm, Argo Rollouts |
+| Metrics and alerting | Prometheus, Alertmanager, Grafana |
+| Logs and traces | Loki, OpenTelemetry, Tempo |
+| Policy and secrets | Kyverno, External Secrets Operator with AWS Secrets Manager |
+| Networking | AWS Load Balancer Controller, Kubernetes NetworkPolicies |
+| Autoscaling | HorizontalPodAutoscaler, Karpenter |
+
+## Reliability targets
+
+| SLO | Target |
+|---|---|
+| Redirect availability | 99.9% of `GET /{code}` requests succeed, over 30 days |
+| Redirect latency | 99.5% of redirects complete in under 300 ms |
+| Analytics freshness | Click stats are no more than 60 s behind |
+
+Alerts fire on error-budget burn rate rather than on individual errors.
+
+## Repository layout
+
+```
+services/
+  api/          FastAPI service
+  web/          FastAPI + Jinja UI
+  worker/       click event consumer
+deploy/
+  charts/       Helm chart for the application
+  envs/         per-environment values (dev, prod)
+  argocd/       Argo CD applications (app-of-apps)
+infra/
+  terraform/    AWS infrastructure
+platform/       cluster add-ons: monitoring, policies, secrets, ingress
+docs/
+  runbooks/     on-call procedures per alert
+  adr/          architecture decision records
+.github/
+  workflows/    CI pipelines
+```
+
+## Local development
+
+Requirements: Docker, Python 3.12+, and for the Kubernetes setup: kind, kubectl, Helm.
+
+```bash
+# Run the full stack with Docker Compose
+docker compose up --build
+
+# Run tests for a service
+cd services/api && pytest
+```
+
+A local Kubernetes environment that mirrors production (kind + Argo CD + monitoring) is created with `make cluster-up`.
 
 ## Roadmap
 
-Each phase ends with something working that you can demo, plus a short write-up in `docs/journal/`.
+**Application**
+- [ ] `api`, `web` and `worker` services with unit and integration tests
+- [ ] Container images: multi-stage builds, non-root, minimal base
+- [ ] Docker Compose stack for local development
+- [ ] Health, readiness and Prometheus metrics endpoints
 
-### Phase 0: Tools and foundations (local)
-- [ ] Install Colima (Docker runtime), docker CLI, kind, kubectl, helm, k9s, terraform, awscli, argocd CLI
-- [ ] Git basics: branches, PRs, conventional commits
+**Continuous integration**
+- [ ] Lint, test and coverage on every pull request
+- [ ] Image build and push tagged by commit SHA
+- [ ] Vulnerability scanning with Trivy; SBOM per image
 
-### Phase 1: The app in containers
-- [ ] Write the three services with unit tests (pytest)
-- [ ] Multi-stage Dockerfiles, non-root user, small images
-- [ ] `docker compose up` runs the whole app with Postgres and Redis
-- [ ] `/healthz` and `/readyz` endpoints, `/metrics` (Prometheus client)
+**Kubernetes and delivery**
+- [ ] Helm chart with probes, resource limits and HPA
+- [ ] Argo CD app-of-apps with `dev` and `prod` environments
+- [ ] Automated image tag promotion via pull request
+- [ ] Canary releases with Argo Rollouts and automated rollback
 
-### Phase 2: CI with GitHub Actions
-- [ ] Lint (ruff), tests, coverage on every PR
-- [ ] Build and push images to GitHub Container Registry, tagged with the commit SHA
-- [ ] Trivy image scan, fail on CRITICAL
-- [ ] Generate an SBOM; cache dependencies to keep CI fast
+**Observability**
+- [ ] RED metrics per service, queue depth and worker lag
+- [ ] Grafana dashboards and alert rules as code
+- [ ] Centralised logs (Loki) and distributed tracing (OpenTelemetry, Tempo)
+- [ ] SLO burn-rate alerts
 
-### Phase 3: Kubernetes locally
-- [ ] kind cluster with ingress-nginx
-- [ ] Helm chart for the app: Deployments, Services, Ingress, ConfigMaps, Secrets
-- [ ] Liveness/readiness probes, resource requests/limits, HPA
-- [ ] PostgreSQL and Redis via Helm charts
+**Security**
+- [ ] Kyverno admission policies (no `:latest`, required limits, non-root)
+- [ ] Secrets from AWS Secrets Manager via External Secrets
+- [ ] NetworkPolicies and least-privilege RBAC
 
-### Phase 4: GitOps with Argo CD
-- [ ] Install Argo CD, "app of apps" pattern
-- [ ] `dev` and `prod` environments with separate Helm values
-- [ ] CI opens a PR to bump the image tag; merging it deploys
-- [ ] Argo Rollouts canary release with automatic rollback
+**AWS infrastructure**
+- [ ] Terraform: VPC, EKS, ECR, IAM roles for service accounts, remote state
+- [ ] GitHub Actions to AWS via OIDC
+- [ ] AWS Load Balancer Controller and Karpenter
 
-### Phase 5: Observability
-- [ ] kube-prometheus-stack: Prometheus, Alertmanager, Grafana
-- [ ] App metrics: request rate, errors, latency (RED), queue depth, clicks/sec
-- [ ] Grafana dashboards as code; alerts to Slack/email
-- [ ] Logs with Loki, traces with OpenTelemetry + Tempo
-- [ ] One SLO: 99.5% of redirects under 300 ms, with an error-budget alert
+**Operations**
+- [ ] Load testing with k6
+- [ ] Runbooks for every alert
+- [ ] PostgreSQL backup and restore procedure
+- [ ] Failure-injection testing and incident write-ups
 
-### Phase 6: Security
-- [ ] Kyverno policies: no `:latest`, limits required, non-root containers
-- [ ] External Secrets Operator (AWS Secrets Manager in phase 7)
-- [ ] NetworkPolicies between services; least-privilege RBAC
+## License
 
-### Phase 7: AWS with Terraform
-- [ ] Remote state in S3 with locking
-- [ ] VPC, EKS, ECR, IAM roles for service accounts (IRSA)
-- [ ] GitHub Actions → AWS via OIDC (no stored access keys)
-- [ ] AWS Load Balancer Controller, Karpenter, External Secrets with Secrets Manager
-- [ ] Same Argo CD setup deploys to EKS
-- [ ] `terraform destroy` after each session; a cost note in the README
-
-### Phase 8: Operating it
-- [ ] Load test with k6 and watch HPA/Karpenter scale
-- [ ] Break things on purpose (kill pods, fill the queue, bad deploy) and write runbooks
-- [ ] One written postmortem
-- [ ] Postgres backup and restore drill
+[MIT](LICENSE)
