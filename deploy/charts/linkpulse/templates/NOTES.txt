@@ -1,0 +1,5 @@
+LinkPulse api {{ .Values.api.image.tag }} deployed as {{ include "linkpulse.api.name" . }}.
+
+Try it from your machine:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "linkpulse.api.name" . }} 8000:{{ .Values.api.service.port }}
+  curl -X POST localhost:8000/links -H 'Content-Type: application/json' -d '{"url": "https://example.com"}'

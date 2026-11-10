@@ -1,0 +1,28 @@
+{{- $as := .Values.api.autoscaling -}}
+{{- if $as.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "linkpulse.api.name" . }}
+  labels:
+    {{- include "linkpulse.api.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "linkpulse.api.name" . }}
+  minReplicas: {{ $as.minReplicas }}
+  maxReplicas: {{ $as.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetCPUUtilizationPercentage }}
+  behavior:
+    # Scale down slowly so a short dip in traffic doesn't remove capacity
+    # that is needed again a minute later.
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}

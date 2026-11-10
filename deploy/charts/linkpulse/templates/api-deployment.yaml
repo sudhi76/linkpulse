@@ -1,0 +1,127 @@
+{{- $api := .Values.api -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "linkpulse.api.name" . }}
+  labels:
+    {{- include "linkpulse.api.labels" . | nindent 4 }}
+spec:
+  {{- if not $api.autoscaling.enabled }}
+  replicas: {{ $api.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "linkpulse.api.selectorLabels" . | nindent 6 }}
+  # Start a new pod before stopping an old one, so capacity never drops
+  # during a rollout.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "linkpulse.api.labels" . | nindent 8 }}
+      {{- with $api.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "linkpulse.api.name" . }}
+      # The API never calls the Kubernetes API, so it gets no token.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread replicas across zones and nodes when possible, so one failure
+      # doesn't take out every pod.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "linkpulse.api.selectorLabels" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "linkpulse.api.selectorLabels" . | nindent 14 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: "{{ $api.image.repository }}:{{ required "api.image.tag is required (the commit SHA to deploy)" $api.image.tag }}"
+          imagePullPolicy: {{ $api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: BASE_URL
+              value: {{ $api.baseUrl | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "api.database.existingSecret is required" $api.database.existingSecret }}
+                  key: {{ $api.database.secretKey }}
+          # Gives slow starts (cold cache, waiting for the database) up to 60s
+          # before liveness checks begin.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # Liveness only checks the process: a database outage must not make
+          # Kubernetes restart every pod.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Readiness checks the database: a pod that can't reach it stops
+          # receiving traffic but keeps running.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          # Endpoints are removed asynchronously when a pod stops. Waiting a few
+          # seconds before SIGTERM lets load balancers stop sending new
+          # requests first, so rollouts don't drop redirects.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            {{- toYaml $api.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Writable scratch space; the root filesystem is read-only.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- with $api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
