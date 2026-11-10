@@ -138,8 +138,8 @@ A local Kubernetes environment that mirrors production (kind + Argo CD + monitor
 
 **Continuous integration**
 - [x] Lint, test and coverage on every pull request
-- [ ] Image build and push tagged by commit SHA
-- [ ] Vulnerability scanning with Trivy; SBOM per image
+- [x] Image build and push tagged by commit SHA
+- [x] Vulnerability scanning with Trivy; SBOM per image
 
 **Kubernetes and delivery**
 - [ ] Helm chart with probes, resource limits and HPA

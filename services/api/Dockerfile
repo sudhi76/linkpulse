@@ -14,7 +14,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy only the requirements first: this layer is cached and reused until
 # requirements.txt changes, so code edits don't reinstall every dependency.
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt \
+    && pip uninstall -y pip
 
 # ---- Stage 2: runtime -------------------------------------------------------
 FROM python:3.13-slim AS runtime
@@ -22,6 +23,14 @@ FROM python:3.13-slim AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+# Install Debian security fixes newer than the base image, and remove pip:
+# the app never installs anything at runtime, and pip bundles its own copies
+# of libraries (urllib3, msgpack) that would need patching too.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip
 
 # Run as an unprivileged user with a fixed UID, so Kubernetes
 # (runAsNonRoot) and policy engines can verify it.
