@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.codes import generate_code, is_valid_alias
-from app.db import Base, engine, get_session
+from app.db import create_schema, engine, get_session
 from app.models import Link, utcnow
 from app.schemas import LinkCreate, LinkOut
 
@@ -23,7 +23,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 async def lifespan(app: FastAPI):
     # Creates tables on startup. Replaced by Alembic migrations later, so
     # schema changes are versioned and reviewed like code.
-    Base.metadata.create_all(engine)
+    create_schema(engine)
     yield
 
 
