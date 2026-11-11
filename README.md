@@ -166,8 +166,8 @@ A local Kubernetes environment that mirrors production (kind + Argo CD + monitor
 
 **Application**
 - [ ] `api`, `web` and `worker` services with unit and integration tests
-- [ ] Container images: multi-stage builds, non-root, minimal base
-- [ ] Docker Compose stack for local development
+- [x] Container images: multi-stage builds, non-root, minimal base
+- [x] Docker Compose stack for local development
 - [ ] Health, readiness and Prometheus metrics endpoints
 
 **Continuous integration**
