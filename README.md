@@ -126,9 +126,11 @@ Before pushing, run the same checks CI runs on every pull request (from `service
 ruff check . && ruff format --check . && pytest --cov=app --cov-fail-under=80
 ```
 
-### Kubernetes (kind)
+### Kubernetes (kind) with Argo CD
 
-Runs the Helm chart against a local cluster. PostgreSQL runs in the cluster as a single-instance StatefulSet (`deploy/envs/dev/postgres.yaml`); production uses Amazon RDS instead, so the chart only takes the name of a Secret with the database URL.
+Argo CD deploys everything from `main`: the Helm chart with `deploy/envs/dev/values.yaml`, and PostgreSQL as a single-instance StatefulSet (`deploy/envs/dev/postgres.yaml`). Production uses Amazon RDS instead, so the chart only takes the name of a Secret with the database URL.
+
+Only Argo CD itself, the root Application and the Secrets are created by hand:
 
 ```bash
 kind create cluster --name linkpulse
@@ -140,25 +142,39 @@ kubectl -n linkpulse create secret generic postgres-credentials \
 kubectl -n linkpulse create secret generic linkpulse-db \
   --from-literal=DATABASE_URL=postgresql+psycopg://linkpulse:linkpulse-dev@postgres:5432/linkpulse
 
-kubectl -n linkpulse apply -f deploy/envs/dev/postgres.yaml
-kubectl -n linkpulse rollout status statefulset/postgres
+# Argo CD, then the app-of-apps, which deploys deploy/argocd/apps/*
+helm repo add argo https://argoproj.github.io/argo-helm
+helm -n argocd install argocd argo/argo-cd --version 10.17.2 \
+  --create-namespace -f platform/argocd/values.yaml --wait
+kubectl apply -f deploy/argocd/root.yaml
 
-# Dev settings (image tag, replicas, no HPA) live in deploy/envs/dev/values.yaml
-helm -n linkpulse install linkpulse deploy/charts/linkpulse \
-  -f deploy/envs/dev/values.yaml
-
+kubectl -n argocd get applications   # wait for Synced / Healthy
 kubectl -n linkpulse port-forward svc/linkpulse-api 8080:80
 ```
 
-Published images cover `amd64` and `arm64`, so this works on Apple Silicon too. To run code that isn't on `main` yet, build the image locally and load it into the cluster instead:
+The Argo CD UI is at http://localhost:8081 (user `admin`):
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8081:80
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
+
+**Deploying** is a pull request: change `api.image.tag` in `deploy/envs/dev/values.yaml` to a commit SHA published from `main`, merge, and Argo CD rolls it out within a minute. Changes made by hand with `kubectl` are reverted (self-heal).
+
+To try an image that isn't on `main` yet, pause syncing first, or Argo CD will undo the change:
 
 ```bash
 docker build -t ghcr.io/sudhi76/linkpulse-api:dev services/api
 kind load docker-image ghcr.io/sudhi76/linkpulse-api:dev --name linkpulse
-# then add --set api.image.tag=dev to the helm command
+kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":null}}'
+kubectl -n argocd patch application linkpulse-dev --type merge -p '{"spec":{"syncPolicy":null}}'
+kubectl -n linkpulse set image deployment/linkpulse-api api=ghcr.io/sudhi76/linkpulse-api:dev
+
+# Back to what's in Git:
+kubectl apply -f deploy/argocd/root.yaml
 ```
 
-The database lives on the PersistentVolumeClaim `data-postgres-0`, which survives pod restarts, `helm uninstall` and deleting the StatefulSet. To start from an empty database, delete the PVC; `kind delete cluster` removes everything.
+The database lives on the PersistentVolumeClaim `data-postgres-0`, which survives pod restarts and deleting the StatefulSet or its Application. To start from an empty database, delete the PVC; `kind delete cluster` removes everything.
 
 A local Kubernetes environment that mirrors production (kind + Argo CD + monitoring) is created with `make cluster-up`.
 
