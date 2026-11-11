@@ -43,8 +43,9 @@ def to_out(link: Link) -> LinkOut:
 @app.get("/healthz")
 def healthz() -> dict:
     """Liveness: the process is up. Never checks dependencies, or a database
-    outage would make Kubernetes restart every healthy API pod."""
-    return {"status": "ok"}
+    outage would make Kubernetes restart every healthy API pod. Also reports
+    the build, so you can check which commit a pod is running."""
+    return {"status": "ok", "version": config.VERSION}
 
 
 @app.get("/readyz")

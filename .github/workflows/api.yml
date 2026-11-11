@@ -86,6 +86,7 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           load: true
+          build-args: APP_VERSION=${{ github.sha }}
           # The name Compose gives the api image, so the next step reuses it.
           tags: linkpulse-api:latest
           cache-from: type=gha,scope=api-${{ matrix.arch }}
@@ -132,6 +133,8 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS http://localhost:8000/readyz
+          version=$(curl -fsS http://localhost:8000/healthz | jq -r .version)
+          test "$version" = "$GITHUB_SHA"
           code=$(curl -fsS -X POST http://localhost:8000/links \
             -H 'Content-Type: application/json' \
             -d '{"url": "https://example.com/ci"}' | jq -r .code)
@@ -170,6 +173,7 @@ jobs:
           context: services/api
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: APP_VERSION=${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
