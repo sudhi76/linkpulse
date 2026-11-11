@@ -1,0 +1,25 @@
+# Argo CD on the local kind cluster. Installed once by hand (see README);
+# after that it deploys everything else from Git.
+#
+#   helm repo add argo https://argoproj.github.io/argo-helm
+#   helm -n argocd install argocd argo/argo-cd --version 10.17.2 \
+#     --create-namespace -f platform/argocd/values.yaml
+
+configs:
+  params:
+    # Serve plain HTTP: locally the UI is only reached through kubectl
+    # port-forward, which never leaves the machine. In AWS the load
+    # balancer will terminate TLS.
+    server.insecure: true
+  cm:
+    # Poll Git every minute instead of the default three, so a merged PR
+    # reaches the cluster quickly. A GitHub webhook would make it instant,
+    # but GitHub can't reach a laptop.
+    timeout.reconciliation: 60s
+
+# Single sign-on and notifications aren't needed locally; the admin user
+# is enough and these would only use memory.
+dex:
+  enabled: false
+notifications:
+  enabled: false
