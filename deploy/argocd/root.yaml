@@ -1,0 +1,23 @@
+# App-of-apps: the only Application applied by hand. It deploys every
+# Application in deploy/argocd/apps/, so adding a service or environment is
+# a PR that adds a file there.
+#
+#   kubectl apply -f deploy/argocd/root.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sudhi76/linkpulse.git
+    targetRevision: main
+    path: deploy/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true # an Application file deleted from Git is deleted here
+      selfHeal: true

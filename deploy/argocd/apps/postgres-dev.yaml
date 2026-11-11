@@ -1,0 +1,29 @@
+# PostgreSQL for the local cluster (deploy/envs/dev/postgres.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres-dev
+  namespace: argocd
+  annotations:
+    # Synced before the API (wave 0), which needs the database to start.
+    argocd.argoproj.io/sync-wave: "-1"
+  # No resources-finalizer: deleting this Application leaves the database
+  # running instead of deleting it along with the Application.
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sudhi76/linkpulse.git
+    targetRevision: main
+    path: deploy/envs/dev
+    directory:
+      # values.yaml in the same folder is Helm values, not a manifest.
+      include: postgres.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: linkpulse
+  syncPolicy:
+    automated:
+      prune: false # never delete the database because a file moved
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

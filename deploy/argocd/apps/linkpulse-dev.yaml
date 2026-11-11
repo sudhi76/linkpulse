@@ -1,0 +1,29 @@
+# The LinkPulse chart with the dev values. Deploying to dev is a PR that
+# changes deploy/envs/dev/values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: linkpulse-dev
+  namespace: argocd
+  # Deleting this Application deletes the resources it created.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io/foreground
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sudhi76/linkpulse.git
+    targetRevision: main
+    path: deploy/charts/linkpulse
+    helm:
+      releaseName: linkpulse
+      valueFiles:
+        - ../../envs/dev/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: linkpulse
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
