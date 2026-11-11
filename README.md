@@ -143,11 +143,9 @@ kubectl -n linkpulse create secret generic linkpulse-db \
 kubectl -n linkpulse apply -f deploy/envs/dev/postgres.yaml
 kubectl -n linkpulse rollout status statefulset/postgres
 
-# kind has no metrics-server, so the HPA is turned off
+# Dev settings (image tag, replicas, no HPA) live in deploy/envs/dev/values.yaml
 helm -n linkpulse install linkpulse deploy/charts/linkpulse \
-  --set api.image.tag=<commit SHA> \
-  --set api.database.existingSecret=linkpulse-db \
-  --set api.autoscaling.enabled=false
+  -f deploy/envs/dev/values.yaml
 
 kubectl -n linkpulse port-forward svc/linkpulse-api 8080:80
 ```
@@ -157,7 +155,7 @@ Published images cover `amd64` and `arm64`, so this works on Apple Silicon too. 
 ```bash
 docker build -t ghcr.io/sudhi76/linkpulse-api:dev services/api
 kind load docker-image ghcr.io/sudhi76/linkpulse-api:dev --name linkpulse
-# then install with --set api.image.tag=dev
+# then add --set api.image.tag=dev to the helm command
 ```
 
 The database lives on the PersistentVolumeClaim `data-postgres-0`, which survives pod restarts, `helm uninstall` and deleting the StatefulSet. To start from an empty database, delete the PVC; `kind delete cluster` removes everything.

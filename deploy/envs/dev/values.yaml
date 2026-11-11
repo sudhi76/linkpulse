@@ -1,0 +1,21 @@
+# Values for the local kind cluster, layered on top of the chart's
+# values.yaml. Argo CD will deploy the chart with this file, so changing
+# what runs in dev means changing this file in a pull request.
+api:
+  image:
+    # Commit SHA of an image published from main. A deploy is a PR that
+    # changes this line.
+    tag: 9d9f1fa154bf9061d1d04d1c425a41551248aa35
+
+  # kind has no metrics-server, so an HPA could never read CPU usage.
+  # Two fixed replicas still exercise rolling updates and the PDB.
+  autoscaling:
+    enabled: false
+  replicas: 2
+
+  # Reached through: kubectl -n linkpulse port-forward svc/linkpulse-api 8080:80
+  baseUrl: http://localhost:8080
+
+  database:
+    # Created by hand on kind (see README); never committed.
+    existingSecret: linkpulse-db
