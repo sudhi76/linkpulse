@@ -41,6 +41,12 @@ WORKDIR /app
 COPY --from=build /opt/venv /opt/venv
 COPY app ./app
 
+# Commit SHA, passed by CI (--build-arg APP_VERSION=<sha>) and reported by
+# /healthz. Declared last so a new SHA doesn't invalidate the cached layers
+# above.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 USER 10001
 EXPOSE 8000
 

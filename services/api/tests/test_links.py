@@ -27,7 +27,7 @@ def client():
 
 
 def test_healthz(client):
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/healthz").json() == {"status": "ok", "version": "dev"}
 
 
 def test_readyz(client):
