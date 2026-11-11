@@ -5,7 +5,7 @@ api:
   image:
     # Commit SHA of an image published from main. A deploy is a PR that
     # changes this line.
-    tag: 9d9f1fa154bf9061d1d04d1c425a41551248aa35
+    tag: de29313039921d20332c39803314e3864cd07fc3
 
   # kind has no metrics-server, so an HPA could never read CPU usage.
   # Two fixed replicas still exercise rolling updates and the PDB.
